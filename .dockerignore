@@ -1,0 +1,16 @@
+env/
+venv/
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+.env
+media/
+staticfiles/
+tmp_audio/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+.git/
+.github/

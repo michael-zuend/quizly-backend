@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# All actions are pinned to full commit hashes, because version tags can be
+# moved to other commits afterwards.
+permissions:
+  contents: read
+
+env:
+  SECRET_KEY: ci-only-secret-key
+  DEBUG: "False"
+  GEMINI_API_KEY: ci-dummy-key
+
+jobs:
+  test:
+    name: Lint and tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: quizly
+          POSTGRES_USER: quizly
+          POSTGRES_PASSWORD: quizly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quizly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The test client uses plain HTTP, so the HTTPS redirect is disabled
+      # for the tests only.
+      SECURE_SSL_REDIRECT: "False"
+      POSTGRES_HOST: localhost
+      POSTGRES_DB: quizly
+      POSTGRES_USER: quizly
+      POSTGRES_PASSWORD: quizly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt flake8
+      - name: Check code style
+        run: flake8
+      - name: Run tests with coverage
+        run: coverage run manage.py test
+      - name: Check coverage
+        run: coverage report --fail-under=95
+
+  deploy-check:
+    name: Django deploy checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+      - name: Run check --deploy with production settings
+        run: |
+          export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(50))')"
+          python manage.py check --deploy --fail-level WARNING
+
+  security:
+    name: Security scans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install scanners
+        run: pip install bandit pip-audit
+      - name: Scan code with Bandit
+        run: bandit -r . -ll -x ./env,./*/tests,./*/migrations
+      - name: Check dependencies for known vulnerabilities
+        run: pip-audit -r requirements.txt
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Scan the git history for leaked secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker image scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t quizly-backend:ci .
+      - name: Scan image with Trivy
+        # v0.35.0 was the only release not affected by the trivy-action
+        # supply chain attack in March 2026.
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          version: v0.69.3
+          image-ref: quizly-backend:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
