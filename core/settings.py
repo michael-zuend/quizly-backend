@@ -211,7 +211,34 @@ AUTH_COOKIE_SECURE = not DEBUG
 AUTH_COOKIE_SAMESITE = "Lax"
 
 # Quiz generation.
+# API key for Gemini, only read from the environment.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Gemini model that writes the quiz (Flash is free of charge).
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Whisper model size: tiny, base, small, medium or large.
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+# Folder for the temporary audio files, deleted after each request.
 AUDIO_TEMP_DIR = BASE_DIR / "tmp_audio"
+
+# Limits against abuse: very long videos would block a worker for a long
+# time and fill the disk.
+# Maximum video length in seconds (default 30 minutes).
+MAX_VIDEO_DURATION = int(os.environ.get("MAX_VIDEO_DURATION", "1800"))
+# Maximum size of the downloaded audio file in bytes (default 100 MB).
+MAX_AUDIO_FILESIZE = int(os.environ.get("MAX_AUDIO_FILESIZE", "104857600"))
+# Maximum transcript length sent to Gemini.
+MAX_TRANSCRIPT_CHARS = int(os.environ.get("MAX_TRANSCRIPT_CHARS", "30000"))
+
+# Logging to the console, Docker collects the output (docker logs).
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "root": {
+        "handlers": ["console"],
+        # Level can be changed per environment, for example DEBUG.
+        "level": os.environ.get("LOG_LEVEL", "INFO"),
+    },
+}
