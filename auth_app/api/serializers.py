@@ -1,7 +1,9 @@
 """Serializers for registration and login."""
 
+from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
@@ -32,3 +34,20 @@ class RegistrationSerializer(serializers.ModelSerializer):
         """Create the user with a hashed password."""
         validated_data.pop("confirmed_password")
         return User.objects.create_user(**validated_data)
+
+
+class LoginSerializer(serializers.Serializer):
+    """Check username and password and return the user."""
+
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        """Authenticate the user with a generic error message."""
+        user = authenticate(
+            username=attrs["username"], password=attrs["password"]
+        )
+        if user is None:
+            raise AuthenticationFailed("Invalid username or password.")
+        attrs["user"] = user
+        return attrs
