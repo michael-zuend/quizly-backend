@@ -1,5 +1,6 @@
 name: CI
 
+# Runs on every push to main and on every pull request.
 on:
   push:
     branches: [main]
@@ -7,18 +8,22 @@ on:
 
 # All actions are pinned to full commit hashes, because version tags can be
 # moved to other commits afterwards.
+# The workflow token can only read the repository (least privilege).
 permissions:
   contents: read
 
+# Dummy values for the CI only, real secrets are never stored here.
 env:
   SECRET_KEY: ci-only-secret-key
   DEBUG: "False"
   GEMINI_API_KEY: ci-dummy-key
 
 jobs:
+  # Code style, tests on PostgreSQL and test coverage.
   test:
     name: Lint and tests
     runs-on: ubuntu-latest
+    # Same database as in Docker, so the tests run against PostgreSQL.
     services:
       postgres:
         image: postgres:17-alpine
@@ -47,17 +52,24 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+      # CPU PyTorch first, so Whisper does not pull the CUDA build.
       - name: Install dependencies
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt flake8
+      # PEP 8 check, the configuration is in setup.cfg.
       - name: Check code style
         run: flake8
+      # Fails when a model change has no migration file.
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
       - name: Run tests with coverage
         run: coverage run manage.py test
+      # At least 95 % of the code must be covered by tests.
       - name: Check coverage
         run: coverage report --fail-under=95
 
+  # Django checks the production settings (HTTPS, cookies, HSTS, ...).
   deploy-check:
     name: Django deploy checks
     runs-on: ubuntu-latest
@@ -71,11 +83,13 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
+      # A random 50+ character key, so the key check passes.
       - name: Run check --deploy with production settings
         run: |
           export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(50))')"
           python manage.py check --deploy --fail-level WARNING
 
+  # Static code analysis and known vulnerabilities in dependencies.
   security:
     name: Security scans
     runs-on: ubuntu-latest
@@ -86,16 +100,20 @@ jobs:
           python-version: "3.13"
       - name: Install scanners
         run: pip install bandit pip-audit
+      # Bandit finds insecure Python patterns (medium and high).
       - name: Scan code with Bandit
         run: bandit -r . -ll -x ./env,./*/tests,./*/migrations
+      # pip-audit checks every pinned package against the CVE databases.
       - name: Check dependencies for known vulnerabilities
         run: pip-audit -r requirements.txt
 
+  # Searches the whole git history for leaked keys and passwords.
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Full history, not only the last commit.
         with:
           fetch-depth: 0
       - name: Scan the git history for leaked secrets
@@ -103,6 +121,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Builds the image and scans OS packages and libraries for CVEs.
   docker:
     name: Docker image scan
     runs-on: ubuntu-latest
