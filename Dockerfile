@@ -21,12 +21,15 @@ WORKDIR /app
 COPY requirements.txt .
 
 # The CPU build of PyTorch is installed first, so Whisper does not pull the
-# much larger CUDA build. pip is removed afterwards, so its vendored
-# libraries are not part of the runtime image (fewer CVEs in the scan).
+# much larger CUDA build. setuptools is upgraded, because the version pulled
+# by PyTorch has known vulnerabilities (CVE-2025-47273, CVE-2026-23949,
+# CVE-2026-24049). pip is removed afterwards, so its vendored libraries are
+# not part of the runtime image (fewer CVEs in the scan).
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --upgrade setuptools==84.2.1 \
     && pip uninstall -y pip
-
+    
 # The source code (.dockerignore keeps .env, the database and git out).
 COPY . .
 
