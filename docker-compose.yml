@@ -1,31 +1,51 @@
 services:
+  # PostgreSQL database. It has no port mapping, so it is only reachable
+  # from the backend container inside the Docker network.
   db:
     image: postgres:17-alpine
+    # Database name, user and password come from .env.
     env_file:
       - .env
+    # Data survives container restarts.
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # The backend waits until the database accepts connections.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
+  # Django backend with Gunicorn, yt-dlp, Whisper and Gemini.
   backend:
     build: .
+    # Only bound to localhost of the host machine, not to the network.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    # Secrets (SECRET_KEY, GEMINI_API_KEY, ...) come from .env.
     env_file:
       - .env
     environment:
+      # Service name of the database inside the Docker network.
       - POSTGRES_HOST=db
-      - ALLOWED_HOSTS=127.0.0.1,localhost,0.0.0.0
+      - ALLOWED_HOSTS=127.0.0.1,localhost
     depends_on:
       db:
         condition: service_healthy
+    # Whisper downloads its model once, the volume keeps it.
     volumes:
       - whisper_cache:/home/appuser/.cache/whisper
+    # The process can never gain more rights (for example via setuid).
+    security_opt:
+      - no-new-privileges:true
+    # Gunicorn needs no Linux capabilities, all of them are removed.
+    cap_drop:
+      - ALL
+    restart: unless-stopped
 
 volumes:
+  # Database files.
   postgres_data:
+  # Whisper model files.
   whisper_cache:
